@@ -1,0 +1,61 @@
+project_name: parallel-image-build
+release:
+  footer: |
+    ## Docker Images
+    - `paskalmaksim/{{.ProjectName}}:latest`
+    - `paskalmaksim/{{.ProjectName}}:{{ .Tag }}`
+docker_manifests:
+- name_template: paskalmaksim/{{.ProjectName}}:latest
+  image_templates:
+  - paskalmaksim/{{.ProjectName}}:{{.Tag}}-amd64
+  - paskalmaksim/{{.ProjectName}}:{{.Tag}}-arm64
+- name_template: paskalmaksim/{{.ProjectName}}:{{.Tag}}
+  image_templates:
+  - paskalmaksim/{{.ProjectName}}:{{.Tag}}-amd64
+  - paskalmaksim/{{.ProjectName}}:{{.Tag}}-arm64
+dockers:
+- use: buildx
+  goos: linux
+  goarch: amd64
+  image_templates:
+  - paskalmaksim/{{.ProjectName}}:{{.Tag}}-amd64
+  build_flag_templates:
+  - "--platform=linux/amd64"
+  - "--label=org.opencontainers.image.created={{.Date}}"
+  - "--label=org.opencontainers.image.title={{.ProjectName}}"
+  - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+  - "--label=org.opencontainers.image.version={{.Version}}"
+- use: buildx
+  goos: linux
+  goarch: arm64
+  image_templates:
+  - paskalmaksim/{{.ProjectName}}:{{.Tag}}-arm64
+  build_flag_templates:
+  - "--platform=linux/arm64/v8"
+  - "--label=org.opencontainers.image.created={{.Date}}"
+  - "--label=org.opencontainers.image.title={{.ProjectName}}"
+  - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+  - "--label=org.opencontainers.image.version={{.Version}}"
+builds:
+- dir: ./cmd
+  env:
+  - CGO_ENABLED=0
+  flags:
+  - -trimpath
+  ldflags:
+  - -s -w
+  goos:
+  - linux
+  goarch:
+  - amd64
+  - arm64
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'
