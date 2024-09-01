@@ -1,7 +1,6 @@
 FROM alpine:latest
 
+RUN apk add --no-cache docker-cli-buildx
 COPY ./parallel-image-build /usr/local/bin/parallel-image-build
-
-USER 30005
 
 ENTRYPOINT [ "/usr/local/bin/parallel-image-build" ]
