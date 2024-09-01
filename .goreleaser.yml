@@ -17,6 +17,7 @@ dockers:
 - use: buildx
   goos: linux
   goarch: amd64
+  dockerfile: Dockerfile.release
   image_templates:
   - paskalmaksim/{{.ProjectName}}:{{.Tag}}-amd64
   build_flag_templates:
@@ -28,6 +29,7 @@ dockers:
 - use: buildx
   goos: linux
   goarch: arm64
+  dockerfile: Dockerfile.release
   image_templates:
   - paskalmaksim/{{.ProjectName}}:{{.Tag}}-arm64
   build_flag_templates:
