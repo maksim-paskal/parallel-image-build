@@ -76,7 +76,6 @@ func (p *FlagProvider) ProgramArgs() []string {
 			"build",
 			"--pull",
 			"--push",
-			"--provenance=false",
 		}
 	}
 
