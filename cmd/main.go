@@ -28,6 +28,7 @@ func main() { //nolint:funlen
 	debug := flag.Bool("debug", false, "debug mode")
 	gitlabBranchRegistry := flag.String("gitlab-branch-registry", "", "platform to use when no tag is found in gitlab")
 	gitlabBranchPlatform := flag.String("gitlab-branch-platform", "", "platform to use when no tag is found in gitlab")
+	withAttestation := flag.Bool("with-attestation", true, "publish attestation on build")
 
 	flag.Parse()
 
@@ -37,6 +38,7 @@ func main() { //nolint:funlen
 
 	application.GitlabBranchPlatform = *gitlabBranchPlatform
 	application.GitlabBranchRegistry = *gitlabBranchRegistry
+	application.WithAttestation = *withAttestation
 
 	if err := application.Validate(); err != nil {
 		slog.Error("Error validating", "error", err.Error())

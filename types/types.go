@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -69,14 +70,15 @@ var FlagProviderValid = []FlagProvider{FlagProviderBuildx} //nolint:gochecknoglo
 
 const FlagProviderBuildx FlagProvider = "buildx"
 
-func (p *FlagProvider) ProgramArgs() []string {
+func (p *FlagProvider) ProgramArgs(attestation bool) []string {
 	if *p == FlagProviderBuildx {
 		return []string{
 			"buildx",
 			"build",
 			"--pull",
 			"--push",
-			"--provenance=false",
+			"--sbom=" + strconv.FormatBool(attestation),
+			"--provenance=" + strconv.FormatBool(attestation),
 		}
 	}
 

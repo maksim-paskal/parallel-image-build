@@ -29,6 +29,7 @@ type Application struct {
 	Tag                  types.FlagList
 	GitlabBranchPlatform string
 	GitlabBranchRegistry string
+	WithAttestation      bool
 }
 
 func (a *Application) shell(ctx context.Context, name string, arg ...string) error {
@@ -72,7 +73,7 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 		args = append(args, registry+image)
 	}
 
-	buildArgs := append(a.Provider.ProgramArgs(), a.ProviderArgs...)
+	buildArgs := append(a.Provider.ProgramArgs(a.WithAttestation), a.ProviderArgs...)
 	buildArgs = append(buildArgs, args...)
 
 	if err := a.shell(ctx, a.Provider.Program(), buildArgs...); err != nil {
@@ -85,22 +86,11 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 func (a *Application) publishManifestRegistry(ctx context.Context, registry string, i int) error {
 	image := registry + a.ImagePath[i]
 
-	// remove local manifest
-	manifestRemoveArgs := []string{
-		"manifest",
-		"rm",
-		image,
-	}
-
-	ctx = context.WithValue(ctx, types.ContextKeyGroup, strconv.Itoa(i)+"/manifest/remove")
-
-	if err := a.shell(ctx, a.Provider.Program(), manifestRemoveArgs...); err != nil {
-		slog.Debug("failed to remove manifest", "error", err.Error())
-	}
-
 	manifestCreateArgs := []string{
-		"manifest",
+		"buildx",
+		"imagetools",
 		"create",
+		"-t",
 		image,
 	}
 
@@ -116,17 +106,18 @@ func (a *Application) publishManifestRegistry(ctx context.Context, registry stri
 		return errors.Wrap(err, "failed to create manifest")
 	}
 
-	manifestPushArgs := []string{
-		"manifest",
-		"push",
+	manifestInspectArgs := []string{
+		"buildx",
+		"imagetools",
+		"inspect",
 		image,
 	}
 
-	// push
-	ctx = context.WithValue(ctx, types.ContextKeyGroup, strconv.Itoa(i)+"/manifest/push")
+	// inspect
+	ctx = context.WithValue(ctx, types.ContextKeyGroup, strconv.Itoa(i)+"/manifest/inspect")
 
-	if err := a.shell(ctx, a.Provider.Program(), manifestPushArgs...); err != nil {
-		return errors.Wrap(err, "failed to push manifest")
+	if err := a.shell(ctx, a.Provider.Program(), manifestInspectArgs...); err != nil {
+		return errors.Wrap(err, "failed to create manifest")
 	}
 
 	return nil
