@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -25,6 +26,7 @@ func main() { //nolint:funlen
 
 	flag.Var(&application.Tag, "tag", "tag to use")
 
+	version := flag.Bool("version", false, "print version")
 	debug := flag.Bool("debug", false, "debug mode")
 	gitlabBranchRegistry := flag.String("gitlab-branch-registry", "", "platform to use when no tag is found in gitlab")
 	gitlabBranchPlatform := flag.String("gitlab-branch-platform", "", "platform to use when no tag is found in gitlab")
@@ -32,6 +34,11 @@ func main() { //nolint:funlen
 	withAttestation := flag.Bool("with-attestation", false, "publish attestation on build")
 
 	flag.Parse()
+
+	if *version {
+		fmt.Println(internal.Version) //nolint:forbidigo
+		os.Exit(0)
+	}
 
 	if *debug {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
