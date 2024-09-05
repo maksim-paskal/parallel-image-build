@@ -1,0 +1,129 @@
+{{ if .Values.buildkit.enabled }}
+{{ range $i, $architecture := tuple "amd64" "arm64" }}
+{{ $buildkit := index $.Values.buildkit $architecture }}
+{{ $name := printf "buildkitd-%s" $architecture }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: buildkitd
+  name: {{ $name }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: {{ $buildkit.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/buildkitd-config.yaml") $ | sha256sum }}
+        checksum/files: {{ include (print $.Template.BasePath "/buildkitd-files.yaml") $ | sha256sum }}
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+        pod-admission-controller/ignore-nonroot: buildkitd
+    spec:
+      priorityClassName: high-priority
+      nodeSelector:
+{{ toYaml $buildkit.nodeSelector | indent 7 }}
+      tolerations:
+{{ toYaml $buildkit.tolerations | indent 7 }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - {{ $name }}
+            topologyKey: kubernetes.io/hostname
+      volumes:
+      - name: buildkitd-config
+        configMap:
+          name: buildkitd-config
+      - name: buildkitd-files
+        configMap:
+          name: buildkitd-files
+      - name: containerd-socket
+        hostPath:
+          path: /run/containerd/containerd.sock
+      - name: cache
+        emptyDir: {}
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+      - name: buildkitd
+        image: {{ $.Values.buildkit.image }}
+        args:
+        - --config=/config/buildkitd.toml
+        - --addr=unix:///run/buildkit/buildkitd.sock
+        - --addr=tcp://0.0.0.0:1234
+        - --tlscacert
+        - /files/CA.crt
+        - --tlscert
+        - /files/server.crt
+        - --tlskey
+        - /files/server.key
+        resources:
+          requests:
+            cpu: 1
+            memory: 4Gi
+        securityContext:
+          privileged: true
+        readinessProbe:
+          exec:
+            command:
+            - buildctl
+            - debug
+            - workers
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        livenessProbe:
+          exec:
+            command:
+            - buildctl
+            - debug
+            - workers
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        ports:
+        - containerPort: 1234
+        volumeMounts:
+        - name: buildkitd-config
+          mountPath: /config
+          readOnly: true
+        - name: buildkitd-files
+          mountPath: /files
+          readOnly: true
+        - name: containerd-socket
+          mountPath: /run/containerd/containerd.sock
+          readOnly: false
+        - name: cache
+          mountPath: /var/lib/buildkit
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: buildkitd
+{{ if $.Values.buildkit.service.annotations }}
+  annotations:
+{{ toYaml $.Values.buildkit.service.annotations | indent 4 }}
+{{ end }}
+  name: {{ $name }}
+spec:
+  type: {{ $.Values.buildkit.service.type }}
+  ports:
+  - port: {{ $.Values.buildkit.service.port }}
+    targetPort: 1234
+    protocol: TCP
+  selector:
+    app: {{ $name }}
+{{ end }}
+{{ end }}
