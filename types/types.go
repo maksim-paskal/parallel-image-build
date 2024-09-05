@@ -2,9 +2,11 @@ package types
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -150,4 +152,48 @@ func (s *ShellLogger) Write(p []byte) (int, error) {
 	fmt.Println(prefix + out) //nolint:forbidigo
 
 	return len(p), nil
+}
+
+func NewImageMetadata() ImageMetadata {
+	m := ImageMetadata{
+		Created: time.Now().Format(time.RFC3339),
+	}
+
+	// load metadata from environment
+	m.Title = os.Getenv("CI_PROJECT_NAME")
+	m.Revision = os.Getenv("CI_COMMIT_SHA")
+	m.Version = os.Getenv("CI_COMMIT_REF_SLUG")
+
+	return m
+}
+
+// https://github.com/opencontainers/image-spec/blob/main/annotations.md#pre-defined-annotation-keys
+type ImageMetadata struct {
+	// Date and time on which the image was built, conforming to RFC 3339
+	Created string
+	// Human-readable title of the image (string)
+	Title string
+	// Source control revision identifier for the packaged software.
+	Revision string
+	// Version of the packaged software
+	Version string
+}
+
+func (m *ImageMetadata) GetBuildLabels() []string {
+	result := []string{}
+
+	label := func(name, value string) {
+		if value == "" {
+			return
+		}
+
+		result = append(result, fmt.Sprintf("--label=%s=%s", name, value))
+	}
+
+	label("org.opencontainers.image.created", m.Created)
+	label("org.opencontainers.image.title", m.Title)
+	label("org.opencontainers.image.revision", m.Revision)
+	label("org.opencontainers.image.version", m.Version)
+
+	return result
 }

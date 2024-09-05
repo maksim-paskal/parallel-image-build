@@ -14,8 +14,12 @@ import (
 	"github.com/pkg/errors"
 )
 
+var Version = "dev" //nolint:gochecknoglobals
+
 func NewApplication() *Application {
-	return &Application{}
+	return &Application{
+		ImageMetadata: types.NewImageMetadata(),
+	}
 }
 
 type Application struct {
@@ -30,6 +34,7 @@ type Application struct {
 	GitlabBranchPlatform string
 	GitlabBranchRegistry string
 	WithAttestation      bool
+	ImageMetadata        types.ImageMetadata
 }
 
 func (a *Application) shell(ctx context.Context, name string, arg ...string) error {
@@ -53,6 +58,14 @@ func (a *Application) shell(ctx context.Context, name string, arg ...string) err
 	return nil
 }
 
+func (a *Application) getBuildLabels() []string {
+	common := []string{
+		"--label=parallel-image-build.version=" + Version,
+	}
+
+	return append(common, a.ImageMetadata.GetBuildLabels()...)
+}
+
 func (a *Application) buildImageArch(ctx context.Context, i int, platform types.Platform) error {
 	image := a.ImagePath[i] + "-" + platform.Arch
 
@@ -67,6 +80,8 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 		a.ImageDockerfile[i],
 		a.ImageContext[i],
 	}
+
+	args = append(args, a.getBuildLabels()...)
 
 	for _, registry := range a.Registry {
 		args = append(args, "-t")
