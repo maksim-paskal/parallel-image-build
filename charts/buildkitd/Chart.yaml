@@ -1,0 +1,8 @@
+apiVersion: v2
+icon: https://helm.sh/img/helm.svg
+name: buildkitd
+version: 1.0.0
+description: BuildKit builder for Containerd
+maintainers:
+- name: maksim-paskal  # Maksim Paskal
+  email: paskal.maksim@gmail.com

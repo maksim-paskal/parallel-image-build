@@ -1,0 +1,27 @@
+buildkit:
+  enabled: true
+  image: moby/buildkit:v0.15.2
+  config: |
+    debug = true
+
+  amd64:
+    replicas: 1
+    nodeSelector: {}
+    tolerations: []
+  arm64:
+    replicas: 1
+    nodeSelector: {}
+    tolerations: []
+  service:
+    type: LoadBalancer
+    port: 41234
+    annotations: {}
+
+registry:
+  enabled: false
+  # for docker attestation you need beta version of registry
+  # image: registry:3.0.0-beta.1
+  image: registry:2.8.3
+  ingress:
+    ingressClassName: nginx
+    host: example.com
