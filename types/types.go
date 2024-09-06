@@ -11,6 +11,18 @@ import (
 	"github.com/pkg/errors"
 )
 
+type FlagString string
+
+func (p *FlagString) Set(value string) error {
+	*p = FlagString(value)
+
+	return nil
+}
+
+func (p *FlagString) String() string {
+	return string(*p)
+}
+
 type FlagList []string
 
 func (p *FlagList) String() string {

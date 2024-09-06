@@ -31,8 +31,8 @@ type Application struct {
 	ImagePath            types.FlagList
 	ImageDockerfile      types.FlagList
 	Tag                  types.FlagList
-	GitlabBranchPlatform string
-	GitlabBranchRegistry string
+	GitlabBranchPlatform types.FlagString
+	GitlabBranchRegistry types.FlagString
 	WithAttestation      bool
 	ImageMetadata        types.ImageMetadata
 }
@@ -267,7 +267,7 @@ func (a *Application) Normalize() error { //nolint:cyclop
 	if len(a.GitlabBranchPlatform) > 0 && a.isGitlabPipelineRunOnBranch() {
 		a.Platform = types.FlagPlatform{}
 
-		if err := a.Platform.Set(a.GitlabBranchPlatform); err != nil {
+		if err := a.Platform.Set(a.GitlabBranchPlatform.String()); err != nil {
 			return errors.Wrap(err, "failed to set platform from gitlab")
 		}
 	}
@@ -276,7 +276,7 @@ func (a *Application) Normalize() error { //nolint:cyclop
 	if len(a.GitlabBranchRegistry) > 0 && a.isGitlabPipelineRunOnBranch() {
 		a.Registry = types.FlagRegistry{}
 
-		if err := a.Registry.Set(a.GitlabBranchRegistry); err != nil {
+		if err := a.Registry.Set(a.GitlabBranchRegistry.String()); err != nil {
 			return errors.Wrap(err, "failed to set registry from gitlab")
 		}
 	}
@@ -319,7 +319,7 @@ func (a *Application) Validate() error {
 }
 
 func (a *Application) Run(ctx context.Context) error {
-	slog.Info("Application is running", "application", a)
+	slog.Info("Application is running", "instance", a)
 	slog.Debug("Images", "len", len(a.ImagePath))
 
 	ctx, cancel := context.WithCancel(ctx)
