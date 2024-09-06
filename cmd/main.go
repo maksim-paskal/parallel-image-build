@@ -23,13 +23,14 @@ func main() { //nolint:funlen
 	flag.Var(&application.ImagePath, "image-path", "path to image")
 	flag.Var(&application.ImageContext, "image-context", "path to image context")
 	flag.Var(&application.ImageDockerfile, "image-dockerfile", "path to image dockerfile")
+	flag.Var(&application.GitlabBranchRegistry, "gitlab-branch-registry", "registry to use when no tag is found in gitlab")
+	flag.Var(&application.GitlabBranchPlatform, "gitlab-branch-platform", "platform to use when no tag is found in gitlab")
 
 	flag.Var(&application.Tag, "tag", "tag to use")
 
 	version := flag.Bool("version", false, "print version")
 	debug := flag.Bool("debug", false, "debug mode")
-	gitlabBranchRegistry := flag.String("gitlab-branch-registry", "", "platform to use when no tag is found in gitlab")
-	gitlabBranchPlatform := flag.String("gitlab-branch-platform", "", "platform to use when no tag is found in gitlab")
+
 	// Attestation will work only with registry > v3.0.0+
 	withAttestation := flag.Bool("with-attestation", false, "publish attestation on build")
 
@@ -44,8 +45,6 @@ func main() { //nolint:funlen
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
 
-	application.GitlabBranchPlatform = *gitlabBranchPlatform
-	application.GitlabBranchRegistry = *gitlabBranchRegistry
 	application.WithAttestation = *withAttestation
 
 	if err := application.Validate(); err != nil {
