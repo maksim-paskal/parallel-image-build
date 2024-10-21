@@ -30,6 +30,7 @@ type Application struct {
 	ImageContext         types.FlagList
 	ImagePath            types.FlagList
 	ImageDockerfile      types.FlagList
+	ImageArgs            types.FlagList
 	Tag                  types.FlagList
 	GitlabBranchPlatform types.FlagString
 	GitlabBranchRegistry types.FlagString
@@ -74,18 +75,19 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 	slog.Info("Start building...", "image", image, "index", i)
 
 	args := []string{
-		"--platform",
-		platform.String(),
-		"-f",
-		a.ImageDockerfile[i],
+		"--platform=" + platform.String(),
+		"--file=" + a.ImageDockerfile[i],
 		a.ImageContext[i],
+	}
+
+	if len(a.ImageArgs[i]) > 0 {
+		args = append(args, a.ImageArgs[i])
 	}
 
 	args = append(args, a.getBuildLabels()...)
 
 	for _, registry := range a.Registry {
-		args = append(args, "-t")
-		args = append(args, registry+image)
+		args = append(args, "--tag="+registry+image)
 	}
 
 	buildArgs := append(a.Provider.ProgramArgs(a.WithAttestation), a.ProviderArgs...)
@@ -254,14 +256,17 @@ func (a *Application) Normalize() error { //nolint:cyclop
 
 	imageContext := make(types.FlagList, len(a.ImagePath))
 	imageDockerfile := make(types.FlagList, len(a.ImagePath))
+	imageArgs := make(types.FlagList, len(a.ImagePath))
 
 	for i := range a.ImagePath {
 		imageContext[i] = a.ImageContext.Get(i, ".")
 		imageDockerfile[i] = a.ImageDockerfile.Get(i, imageContext[i]+"/Dockerfile")
+		imageArgs[i] = a.ImageArgs.Get(i, "")
 	}
 
 	a.ImageContext = imageContext
 	a.ImageDockerfile = imageDockerfile
+	a.ImageArgs = imageArgs
 
 	// check gitlab pipeline platform
 	if len(a.GitlabBranchPlatform) > 0 && a.isGitlabPipelineRunOnBranch() {

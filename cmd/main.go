@@ -23,6 +23,7 @@ func main() { //nolint:funlen
 	flag.Var(&application.ImagePath, "image-path", "path to image")
 	flag.Var(&application.ImageContext, "image-context", "path to image context")
 	flag.Var(&application.ImageDockerfile, "image-dockerfile", "path to image dockerfile")
+	flag.Var(&application.ImageArgs, "image-args", "args passed to docker build")
 	flag.Var(&application.GitlabBranchRegistry, "gitlab-branch-registry", "registry to use when no tag is found in gitlab")
 	flag.Var(&application.GitlabBranchPlatform, "gitlab-branch-platform", "platform to use when no tag is found in gitlab")
 
