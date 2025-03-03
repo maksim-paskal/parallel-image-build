@@ -27,6 +27,9 @@ func main() { //nolint:funlen
 	flag.Var(&application.GitlabBranchRegistry, "gitlab-branch-registry", "registry to use when no tag is found in gitlab")
 	flag.Var(&application.GitlabBranchPlatform, "gitlab-branch-platform", "platform to use when no tag is found in gitlab")
 
+	flag.BoolVar(&application.CheckImageAnnotation, "check-image-annotation", true, "check image annotation")
+	flag.StringVar(&application.CheckImageAnnotationKey, "check-image-annotation-key", "org.opencontainers.image.revision", "check image annotation key")
+
 	flag.Var(&application.Tag, "tag", "tag to use")
 
 	version := flag.Bool("version", false, "print version")

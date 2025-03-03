@@ -171,11 +171,6 @@ func NewImageMetadata() ImageMetadata {
 		Created: time.Now().Format(time.RFC3339),
 	}
 
-	// load metadata from environment
-	m.Title = os.Getenv("CI_PROJECT_NAME")
-	m.Revision = os.Getenv("CI_COMMIT_SHA")
-	m.Version = os.Getenv("CI_COMMIT_REF_SLUG")
-
 	return m
 }
 
@@ -191,21 +186,49 @@ type ImageMetadata struct {
 	Version string
 }
 
-func (m *ImageMetadata) GetBuildLabels() []string {
+// returns build annotations arguments.
+func (m *ImageMetadata) GetBuildAnnotations() []string {
 	result := []string{}
 
-	label := func(name, value string) {
+	for k, v := range m.GetBuildMetadata() {
+		if v == "" {
+			continue
+		}
+
+		result = append(result, fmt.Sprintf("--annotation=%s=%s", k, v))
+	}
+
+	return result
+}
+
+// returns map of build metadata.
+func (m *ImageMetadata) GetBuildMetadata() map[string]string {
+	result := map[string]string{}
+
+	annotation := func(name, value string) {
 		if value == "" {
 			return
 		}
 
-		result = append(result, fmt.Sprintf("--label=%s=%s", name, value))
+		result[name] = value
 	}
 
-	label("org.opencontainers.image.created", m.Created)
-	label("org.opencontainers.image.title", m.Title)
-	label("org.opencontainers.image.revision", m.Revision)
-	label("org.opencontainers.image.version", m.Version)
+	annotation("org.opencontainers.image.created", m.Created)
+	annotation("org.opencontainers.image.title", m.Title)
+	annotation("org.opencontainers.image.revision", m.Revision)
+	annotation("org.opencontainers.image.version", m.Version)
+
+	// add Gitlab CI metadata
+	annotation("com.gitlab.ci.user.name", os.Getenv("GITLAB_USER_NAME"))
+	annotation("com.gitlab.ci.pipeline.id", os.Getenv("CI_PIPELINE_ID"))
+	annotation("com.gitlab.ci.pipeline.url", os.Getenv("CI_PIPELINE_URL"))
+	annotation("com.gitlab.ci.job.id", os.Getenv("CI_JOB_ID"))
+	annotation("com.gitlab.ci.job.url", os.Getenv("CI_JOB_URL"))
+	annotation("com.gitlab.ci.commit.sha", os.Getenv("CI_COMMIT_SHA"))
+	annotation("com.gitlab.ci.commit.ref.name", os.Getenv("CI_COMMIT_REF_NAME"))
+	annotation("com.gitlab.ci.project.path", os.Getenv("CI_PROJECT_PATH"))
+	annotation("org.opencontainers.image.source", os.Getenv("CI_PROJECT_URL"))
+	annotation("org.opencontainers.image.revision", os.Getenv("CI_COMMIT_SHA"))
 
 	return result
 }
