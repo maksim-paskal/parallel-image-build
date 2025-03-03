@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -36,6 +38,9 @@ type Application struct {
 	GitlabBranchRegistry types.FlagString
 	WithAttestation      bool
 	ImageMetadata        types.ImageMetadata
+
+	CheckImageAnnotation    bool
+	CheckImageAnnotationKey string
 }
 
 func (a *Application) shell(ctx context.Context, name string, arg ...string) error {
@@ -59,12 +64,61 @@ func (a *Application) shell(ctx context.Context, name string, arg ...string) err
 	return nil
 }
 
-func (a *Application) getBuildLabels() []string {
-	common := []string{
-		"--label=parallel-image-build.version=" + Version,
+type DockerImageInspect struct {
+	Annotations map[string]string `json:"annotations"`
+}
+
+// inspecting images, return empty map.
+func (a *Application) inspectDockerTag(ctx context.Context, tag string) DockerImageInspect {
+	slog.Debug("Inspecting docker tag", "tag", tag)
+
+	buffer := bytes.Buffer{}
+
+	cmd := exec.CommandContext(ctx, "docker", "buildx", "imagetools", "inspect", "--raw", tag)
+	cmd.Stdout = &buffer
+
+	result := DockerImageInspect{}
+
+	// if command failed return empty result
+	if err := cmd.Run(); err != nil {
+		slog.Warn("Failed to inspect docker tag", "tag", tag, "error", err.Error())
+
+		return result
 	}
 
-	return append(common, a.ImageMetadata.GetBuildLabels()...)
+	if err := json.NewDecoder(&buffer).Decode(&result); err != nil {
+		slog.Error("Failed to decode docker tag", "tag", tag, "error", err.Error())
+
+		return result
+	}
+
+	return result
+}
+
+// return true if local and remote image annotations are equal.
+func (a *Application) ignoreBuild(ctx context.Context, tag string) bool {
+	if !a.CheckImageAnnotation {
+		return false
+	}
+
+	// get current build annotations
+	current := a.ImageMetadata.GetBuildMetadata()[a.CheckImageAnnotationKey]
+
+	if current == "" {
+		return false
+	}
+
+	// get remote build annotations
+	remote := a.inspectDockerTag(ctx, tag).Annotations[a.CheckImageAnnotationKey]
+
+	slog.Info("Checking image annotation",
+		"tag", tag,
+		"key", a.CheckImageAnnotationKey,
+		"current", current,
+		"remote", remote,
+	)
+
+	return current == remote && remote != ""
 }
 
 func (a *Application) buildImageArch(ctx context.Context, i int, platform types.Platform) error {
@@ -84,11 +138,30 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 		args = append(args, a.ImageArgs[i])
 	}
 
-	args = append(args, a.getBuildLabels()...)
+	// add build annotations
+	args = append(args, a.ImageMetadata.GetBuildAnnotations()...)
+
+	tags := []string{}
 
 	for _, registry := range a.Registry {
-		args = append(args, "--tag="+registry+image)
+		tag := registry + image
+
+		if a.ignoreBuild(ctx, tag) {
+			slog.Info("Skipping build", "tag", tag)
+
+			continue
+		}
+
+		tags = append(tags, "--tag="+registry+image)
 	}
+
+	// do not build image if no tags found
+	if len(tags) == 0 {
+		return nil
+	}
+
+	// append tags to build args
+	args = append(args, tags...)
 
 	buildArgs := append(a.Provider.ProgramArgs(a.WithAttestation), a.ProviderArgs...)
 	buildArgs = append(buildArgs, args...)
@@ -220,14 +293,38 @@ func (a *Application) loadFromTags() {
 
 // return true if gitlab pipeline is running on branch.
 func (a *Application) isGitlabPipelineRunOnBranch() bool {
-	if tag, ok := os.LookupEnv("CI_COMMIT_TAG"); ok && len(tag) > 0 {
+	if tag := os.Getenv("CI_COMMIT_TAG"); len(tag) > 0 {
 		return false
 	}
 
 	return true
 }
 
+func (a *Application) loadFromEnv() {
+	fromEnv := func(key string, value interface{}) {
+		env := os.Getenv(key)
+
+		if len(env) == 0 {
+			return
+		}
+
+		switch v := value.(type) {
+		case *bool:
+			if b, err := strconv.ParseBool(env); err == nil {
+				*v = b
+			}
+		case *string:
+			*v = env
+		}
+	}
+
+	fromEnv("PARALLEL_IMAGE_BUILD_CHECK_IMAGE_ANNOTATION", &a.CheckImageAnnotation)
+	fromEnv("PARALLEL_IMAGE_BUILD_CHECK_IMAGE_ANNOTATION_KEY", &a.CheckImageAnnotationKey)
+}
+
 func (a *Application) Normalize() error { //nolint:cyclop
+	a.loadFromEnv()
+
 	if len(a.Provider) == 0 {
 		if err := a.Provider.Set(string(types.FlagProviderBuildx)); err != nil {
 			return errors.Wrap(err, "failed to set provider")
