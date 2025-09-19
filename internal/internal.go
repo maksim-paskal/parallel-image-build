@@ -41,6 +41,9 @@ type Application struct {
 
 	CheckImageAnnotation    bool
 	CheckImageAnnotationKey string
+
+	CacheImage string
+	CacheLocal string
 }
 
 func (a *Application) shell(ctx context.Context, name string, arg ...string) error {
@@ -132,6 +135,16 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 		"--platform=" + platform.String(),
 		"--file=" + a.ImageDockerfile[i],
 		a.ImageContext[i],
+	}
+
+	if a.CacheImage != "" {
+		args = append(args, "--cache-from=type=registry,ref="+a.CacheImage)
+		args = append(args, "--cache-to=type=registry,ref="+a.CacheImage+",mode=max")
+	}
+
+	if a.CacheLocal != "" {
+		args = append(args, "--cache-from=type=local,src="+a.CacheLocal)
+		args = append(args, "--cache-to=type=local,dest="+a.CacheLocal+",mode=max")
 	}
 
 	if len(a.ImageArgs[i]) > 0 {

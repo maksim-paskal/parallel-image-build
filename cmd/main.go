@@ -30,6 +30,9 @@ func main() { //nolint:funlen
 	flag.BoolVar(&application.CheckImageAnnotation, "check-image-annotation", true, "check image annotation")
 	flag.StringVar(&application.CheckImageAnnotationKey, "check-image-annotation-key", "org.opencontainers.image.revision", "check image annotation key")
 
+	flag.StringVar(&application.CacheImage, "cache-image", "", "image to use for cache")
+	flag.StringVar(&application.CacheLocal, "cache-local", "", "local path to use for cache")
+
 	flag.Var(&application.Tag, "tag", "tag to use")
 
 	version := flag.Bool("version", false, "print version")
