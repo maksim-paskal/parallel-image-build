@@ -158,7 +158,7 @@ type ShellLogger struct {
 }
 
 func (s *ShellLogger) Write(p []byte) (int, error) {
-	prefix := "[" + s.Group + "]"
+	prefix := "[" + s.Group + "] "
 	out := strings.ReplaceAll(string(p), "\n", "\n"+prefix)
 
 	fmt.Println(prefix + out) //nolint:forbidigo
