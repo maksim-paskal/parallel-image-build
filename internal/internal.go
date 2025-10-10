@@ -133,7 +133,12 @@ func (a *Application) inspectDockerTag(ctx context.Context, tag string) DockerIm
 
 	buffer := bytes.Buffer{}
 
-	cmd := exec.CommandContext(ctx, "docker", "buildx", "imagetools", "inspect", "--raw", tag)
+	name := "docker"
+	args := []string{"buildx", "imagetools", "inspect", "--raw", tag}
+
+	slog.Debug("Running command", "name", name, "args", args)
+
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = &buffer
 
 	result := DockerImageInspect{}
