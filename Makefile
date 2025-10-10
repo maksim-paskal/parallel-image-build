@@ -1,4 +1,4 @@
-image=paskalmaksim/parallel-image-build:dev
+image=paskalmaksim/parallel-image-build:$(shell git rev-parse --short HEAD)
 
 test:
 	go mod tidy
