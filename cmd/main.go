@@ -27,16 +27,21 @@ func main() { //nolint:funlen
 	flag.Var(&application.GitlabBranchRegistry, "gitlab-branch-registry", "registry to use when no tag is found in gitlab")
 	flag.Var(&application.GitlabBranchPlatform, "gitlab-branch-platform", "platform to use when no tag is found in gitlab")
 
-	flag.BoolVar(&application.CheckImageAnnotation, "check-image-annotation", true, "check image annotation")
-	flag.StringVar(&application.CheckImageAnnotationKey, "check-image-annotation-key", "org.opencontainers.image.revision", "check image annotation key")
+	flag.StringVar(&application.Output, "output", application.Output, "overwrite build output")
+
+	flag.BoolVar(&application.CheckImageAnnotation, "check-image-annotation", application.CheckImageAnnotation, "check image annotation")
+	flag.StringVar(&application.CheckImageAnnotationKey, "check-image-annotation-key", application.CheckImageAnnotationKey, "check image annotation key")
+
+	flag.StringVar(&application.Compression, "compression", application.Compression, "compression algorithm")
+	flag.IntVar(&application.CompressionLevel, "compression-level", application.CompressionLevel, "compression level")
+	flag.BoolVar(&application.CompressionForce, "force-compression", application.CompressionForce, "force compression")
 
 	flag.Var(&application.Tag, "tag", "tag to use")
 
 	version := flag.Bool("version", false, "print version")
 	debug := flag.Bool("debug", false, "debug mode")
 
-	// Attestation will work only with registry > v3.0.0+
-	withAttestation := flag.Bool("with-attestation", false, "publish attestation on build")
+	flag.BoolVar(&application.WithAttestation, "with-attestation", application.WithAttestation, "publish attestation on build")
 
 	flag.Parse()
 
@@ -48,8 +53,6 @@ func main() { //nolint:funlen
 	if *debug {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
-
-	application.WithAttestation = *withAttestation
 
 	if err := application.Validate(); err != nil {
 		slog.Error("Error validating", "error", err.Error())

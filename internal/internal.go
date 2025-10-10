@@ -21,6 +21,16 @@ var Version = "dev" //nolint:gochecknoglobals
 func NewApplication() *Application {
 	return &Application{
 		ImageMetadata: types.NewImageMetadata(),
+
+		// Attestation will work only with registry > v3.0.0+
+		WithAttestation: false,
+
+		CheckImageAnnotation:    true,
+		CheckImageAnnotationKey: "org.opencontainers.image.revision",
+
+		Compression:      "zstd",
+		CompressionLevel: 3, //nolint:mnd
+		CompressionForce: true,
 	}
 }
 
@@ -41,6 +51,52 @@ type Application struct {
 
 	CheckImageAnnotation    bool
 	CheckImageAnnotationKey string
+
+	Compression      string
+	CompressionLevel int
+	CompressionForce bool
+
+	// https://docs.docker.com/build/exporters/image-registry
+	Output string
+}
+
+func (a *Application) mergeOutput() string {
+	output := make(map[string]string)
+
+	// default buildx output
+	output["type"] = "image"
+	output["oci-mediatypes"] = "true"
+
+	// compression
+	output["compression"] = a.Compression
+	if a.CompressionLevel > -1 {
+		output["compression-level"] = strconv.Itoa(a.CompressionLevel)
+	}
+
+	output["force-compression"] = strconv.FormatBool(a.CompressionForce)
+
+	const parts = 2
+
+	// append user output parameters
+	for _, param := range strings.Split(a.Output, ",") {
+		a := strings.SplitN(param, "=", parts)
+
+		if len(a) != parts {
+			slog.Warn("Invalid output parameter", "param", param)
+
+			continue
+		}
+
+		output[a[0]] = a[1]
+	}
+
+	result := []string{}
+
+	for key, value := range output {
+		result = append(result, key+"="+value)
+	}
+
+	return strings.Join(result, ",")
 }
 
 func (a *Application) shell(ctx context.Context, name string, arg ...string) error {
@@ -131,6 +187,7 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 	args := []string{
 		"--platform=" + platform.String(),
 		"--file=" + a.ImageDockerfile[i],
+		"--output=" + a.Output,
 		a.ImageContext[i],
 	}
 
@@ -322,7 +379,7 @@ func (a *Application) loadFromEnv() {
 	fromEnv("PARALLEL_IMAGE_BUILD_CHECK_IMAGE_ANNOTATION_KEY", &a.CheckImageAnnotationKey)
 }
 
-func (a *Application) Normalize() error { //nolint:cyclop
+func (a *Application) Normalize() error { //nolint:cyclop,funlen
 	a.loadFromEnv()
 
 	if len(a.Provider) == 0 {
@@ -382,6 +439,8 @@ func (a *Application) Normalize() error { //nolint:cyclop
 			return errors.Wrap(err, "failed to set registry from gitlab")
 		}
 	}
+
+	a.Output = a.mergeOutput()
 
 	return nil
 }
