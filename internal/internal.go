@@ -58,6 +58,9 @@ type Application struct {
 
 	// https://docs.docker.com/build/exporters/image-registry
 	Output string
+
+	BuildArgs    types.FlagList
+	BuildSecrets types.FlagList
 }
 
 func (a *Application) mergeOutput() string {
@@ -177,6 +180,20 @@ func (a *Application) ignoreBuild(ctx context.Context, tag string) bool {
 	return current == remote && remote != ""
 }
 
+func (a *Application) buildArgs() []string {
+	args := []string{}
+
+	for _, buildArg := range a.BuildArgs {
+		args = append(args, "--build-arg="+buildArg)
+	}
+
+	for _, buildSecret := range a.BuildSecrets {
+		args = append(args, "--secret="+buildSecret)
+	}
+
+	return args
+}
+
 func (a *Application) buildImageArch(ctx context.Context, i int, platform types.Platform) error {
 	image := a.ImagePath[i] + "-" + platform.Arch
 
@@ -194,6 +211,9 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 	if len(a.ImageArgs[i]) > 0 {
 		args = append(args, a.ImageArgs[i])
 	}
+
+	// add build args
+	args = append(args, a.buildArgs()...)
 
 	// add build annotations
 	args = append(args, a.ImageMetadata.GetBuildAnnotations()...)
