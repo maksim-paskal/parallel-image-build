@@ -82,6 +82,10 @@ func (a *Application) mergeOutput() string {
 
 	// append user output parameters
 	for _, param := range strings.Split(a.Output, ",") {
+		if len(param) == 0 {
+			continue
+		}
+
 		a := strings.SplitN(param, "=", parts)
 
 		if len(a) != parts {
