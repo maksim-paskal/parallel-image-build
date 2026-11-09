@@ -59,7 +59,7 @@ func (p *FlagPlatform) String() string {
 }
 
 func (p *FlagPlatform) Set(value string) error {
-	for _, platform := range strings.Split(value, ",") {
+	for platform := range strings.SplitSeq(value, ",") {
 		arch := strings.Split(platform, "/")
 
 		if len(arch) != 2 { //nolint:mnd
@@ -128,7 +128,7 @@ func (p *FlagRegistry) String() string {
 }
 
 func (p *FlagRegistry) Set(value string) error {
-	for _, registry := range strings.Split(value, ",") {
+	for registry := range strings.SplitSeq(value, ",") {
 		*p = append(*p, registry)
 	}
 
@@ -142,9 +142,7 @@ func (p *FlagProviderArgs) String() string {
 }
 
 func (p *FlagProviderArgs) Set(value string) error {
-	for _, registry := range strings.Split(value, " ") {
-		*p = append(*p, registry)
-	}
+	*p = append(*p, strings.Fields(value)...)
 
 	return nil
 }
@@ -166,14 +164,7 @@ func (s *ShellLogger) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func NewImageMetadata() ImageMetadata {
-	m := ImageMetadata{
-		Created: time.Now().Format(time.RFC3339),
-	}
-
-	return m
-}
-
+// ImageMetadata holds OCI image annotations.
 // https://github.com/opencontainers/image-spec/blob/main/annotations.md#pre-defined-annotation-keys
 type ImageMetadata struct {
 	// Date and time on which the image was built, conforming to RFC 3339
@@ -186,7 +177,18 @@ type ImageMetadata struct {
 	Version string
 }
 
-// returns build annotations arguments.
+func NewImageMetadata() ImageMetadata {
+	m := ImageMetadata{
+		Created:  time.Now().Format(time.RFC3339),
+		Title:    "",
+		Revision: "",
+		Version:  "",
+	}
+
+	return m
+}
+
+// GetBuildAnnotations returns build annotations arguments.
 func (m *ImageMetadata) GetBuildAnnotations() []string {
 	result := []string{}
 
@@ -201,7 +203,7 @@ func (m *ImageMetadata) GetBuildAnnotations() []string {
 	return result
 }
 
-// returns map of build metadata.
+// GetBuildMetadata returns map of build metadata.
 func (m *ImageMetadata) GetBuildMetadata() map[string]string {
 	result := map[string]string{}
 

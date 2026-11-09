@@ -1,15 +1,36 @@
-run:
-  timeout: 5m
+version: "2"
+linters:
+  default: all
+  disable:
+    - depguard
+    - exhaustruct
+    - mnd
+    - varnamelen
+  settings:
+    lll:
+      line-length: 200
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   fix: true
-linters-settings:
-  lll:
-    line-length: 200
-linters:
-  enable-all: true
-  disable:
-  - depguard
-  - execinquery
-  - gomnd
-  - exhaustruct
-  - varnamelen
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

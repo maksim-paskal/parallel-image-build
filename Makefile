@@ -3,7 +3,7 @@ image=paskalmaksim/parallel-image-build:$(shell git rev-parse --short HEAD)
 test:
 	go mod tidy
 	go test ./...
-	go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run -v
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run -v
 
 build:
 	go run ./cmd/main.go --debug --tag=$(image)

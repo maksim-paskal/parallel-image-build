@@ -56,10 +56,11 @@ func main() { //nolint:funlen
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
 
-	if err := application.Validate(); err != nil {
+	err := application.Validate()
+	if err != nil {
 		slog.Error("Error validating", "error", err.Error())
 
-		return
+		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,7 +79,8 @@ func main() { //nolint:funlen
 
 	startTime := time.Now()
 
-	if err := application.Run(ctx); err != nil {
+	err = application.Run(ctx)
+	if err != nil {
 		slog.Error("failed to run application", "error", err.Error())
 		cancel()
 
