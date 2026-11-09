@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,23 +18,9 @@ import (
 	"github.com/pkg/errors"
 )
 
+const buildxCommand = "buildx"
+
 var Version = "dev" //nolint:gochecknoglobals
-
-func NewApplication() *Application {
-	return &Application{
-		ImageMetadata: types.NewImageMetadata(),
-
-		// Attestation will work only with registry > v3.0.0+
-		WithAttestation: false,
-
-		CheckImageAnnotation:    true,
-		CheckImageAnnotationKey: "org.opencontainers.image.revision",
-
-		Compression:      "zstd",
-		CompressionLevel: 3, //nolint:mnd
-		CompressionForce: true,
-	}
-}
 
 type Application struct {
 	Provider             types.FlagProvider
@@ -63,6 +51,169 @@ type Application struct {
 	BuildSecrets types.FlagList
 }
 
+func NewApplication() *Application {
+	return &Application{
+		Provider:             "",
+		ProviderArgs:         nil,
+		Platform:             nil,
+		Registry:             nil,
+		ImageContext:         nil,
+		ImagePath:            nil,
+		ImageDockerfile:      nil,
+		ImageArgs:            nil,
+		Tag:                  nil,
+		GitlabBranchPlatform: "",
+		GitlabBranchRegistry: "",
+		ImageMetadata:        types.NewImageMetadata(),
+		Output:               "",
+		BuildArgs:            nil,
+		BuildSecrets:         nil,
+
+		// Attestation will work only with registry > v3.0.0+
+		WithAttestation: false,
+
+		CheckImageAnnotation:    true,
+		CheckImageAnnotationKey: "org.opencontainers.image.revision",
+
+		Compression:      "zstd",
+		CompressionLevel: 3, //nolint:mnd
+		CompressionForce: true,
+	}
+}
+
+func (a *Application) Normalize() error { //nolint:cyclop,funlen
+	a.loadFromEnv()
+
+	if len(a.Provider) == 0 {
+		err := a.Provider.Set(string(types.FlagProviderBuildx))
+		if err != nil {
+			return errors.Wrap(err, "failed to set provider")
+		}
+	}
+
+	if platform := os.Getenv("PARALLEL_IMAGE_BUILD_PLATFORM"); len(platform) > 0 {
+		a.Platform = types.FlagPlatform{}
+
+		err := a.Platform.Set(platform)
+		if err != nil {
+			return errors.Wrap(err, "failed to set platform from env")
+		}
+	}
+
+	if len(a.Platform) == 0 {
+		err := a.Platform.Set("linux/amd64,linux/arm64")
+		if err != nil {
+			return errors.Wrap(err, "failed to set platform")
+		}
+	}
+
+	a.loadFromTags()
+
+	if len(a.Registry) == 0 {
+		err := a.Registry.Set("docker.io")
+		if err != nil {
+			return errors.Wrap(err, "failed to set registry")
+		}
+	}
+
+	imageContext := make(types.FlagList, len(a.ImagePath))
+	imageDockerfile := make(types.FlagList, len(a.ImagePath))
+	imageArgs := make(types.FlagList, len(a.ImagePath))
+
+	for i := range a.ImagePath {
+		imageContext[i] = a.ImageContext.Get(i, ".")
+		imageDockerfile[i] = a.ImageDockerfile.Get(i, imageContext[i]+"/Dockerfile")
+		imageArgs[i] = a.ImageArgs.Get(i, "")
+	}
+
+	a.ImageContext = imageContext
+	a.ImageDockerfile = imageDockerfile
+	a.ImageArgs = imageArgs
+
+	// check gitlab pipeline platform
+	if len(a.GitlabBranchPlatform) > 0 && a.isGitlabPipelineRunOnBranch() {
+		a.Platform = types.FlagPlatform{}
+
+		err := a.Platform.Set(a.GitlabBranchPlatform.String())
+		if err != nil {
+			return errors.Wrap(err, "failed to set platform from gitlab")
+		}
+	}
+
+	// check gitlab pipeline registry
+	if len(a.GitlabBranchRegistry) > 0 && a.isGitlabPipelineRunOnBranch() {
+		a.Registry = types.FlagRegistry{}
+
+		err := a.Registry.Set(a.GitlabBranchRegistry.String())
+		if err != nil {
+			return errors.Wrap(err, "failed to set registry from gitlab")
+		}
+	}
+
+	a.Output = a.mergeOutput()
+
+	return nil
+}
+
+func (a *Application) Validate() error {
+	err := a.Normalize()
+	if err != nil {
+		return errors.Wrap(err, "failed to normalize")
+	}
+
+	if len(a.Provider) == 0 {
+		return errors.New("provider is empty")
+	}
+
+	if len(a.Registry) == 0 {
+		return errors.New("registry is empty")
+	}
+
+	if len(a.ImagePath) == 0 {
+		return errors.New("image-path is empty")
+	}
+
+	if len(a.ImageContext) != len(a.ImagePath) {
+		return errors.New("image-context is invalid")
+	}
+
+	if len(a.ImageDockerfile) != len(a.ImagePath) {
+		return errors.New("image-dockerfile is invalid")
+	}
+
+	for i := range a.ImagePath {
+		if !strings.HasPrefix(a.ImagePath[i], "/") {
+			a.ImagePath[i] = "/" + a.ImagePath[i]
+		}
+	}
+
+	return nil
+}
+
+func (a *Application) Run(ctx context.Context) error {
+	slog.Info("Application is running", "instance", a)
+	slog.Debug("Images", "len", len(a.ImagePath))
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	wg := sync.WaitGroup{}
+
+	for i := range a.ImagePath {
+		wg.Go(func() {
+			err := a.buildImage(ctx, i)
+			if err != nil {
+				slog.Error("failed to build image", "error", err.Error())
+				cancel()
+			}
+		})
+	}
+
+	wg.Wait()
+
+	return ctx.Err() //nolint:wrapcheck
+}
+
 func (a *Application) mergeOutput() string {
 	output := make(map[string]string)
 
@@ -81,7 +232,7 @@ func (a *Application) mergeOutput() string {
 	const parts = 2
 
 	// append user output parameters
-	for _, param := range strings.Split(a.Output, ",") {
+	for param := range strings.SplitSeq(a.Output, ",") {
 		if len(param) == 0 {
 			continue
 		}
@@ -97,10 +248,11 @@ func (a *Application) mergeOutput() string {
 		output[a[0]] = a[1]
 	}
 
-	result := []string{}
+	keys := slices.Sorted(maps.Keys(output))
+	result := make([]string, 0, len(keys))
 
-	for key, value := range output {
-		result = append(result, key+"="+value)
+	for _, key := range keys {
+		result = append(result, key+"="+output[key])
 	}
 
 	return strings.Join(result, ",")
@@ -111,7 +263,7 @@ func (a *Application) shell(ctx context.Context, name string, arg ...string) err
 
 	cmd := exec.CommandContext(ctx, name, arg...)
 
-	logger := types.ShellLogger{}
+	logger := types.ShellLogger{Group: ""}
 
 	if group, ok := ctx.Value(types.ContextKeyGroup).(string); ok {
 		logger.Group = group
@@ -120,7 +272,8 @@ func (a *Application) shell(ctx context.Context, name string, arg ...string) err
 	cmd.Stdout = &logger
 	cmd.Stderr = &logger
 
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	if err != nil {
 		return errors.Wrap(err, "failed to run command")
 	}
 
@@ -138,23 +291,25 @@ func (a *Application) inspectDockerTag(ctx context.Context, tag string) DockerIm
 	buffer := bytes.Buffer{}
 
 	name := "docker"
-	args := []string{"buildx", "imagetools", "inspect", "--raw", tag}
+	args := []string{buildxCommand, "imagetools", "inspect", "--raw", tag}
 
 	slog.Debug("Running command", "name", name, "args", args)
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = &buffer
 
-	result := DockerImageInspect{}
+	result := DockerImageInspect{Annotations: nil}
 
 	// if command failed return empty result
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	if err != nil {
 		slog.Warn("Failed to inspect docker tag", "tag", tag, "error", err.Error())
 
 		return result
 	}
 
-	if err := json.NewDecoder(&buffer).Decode(&result); err != nil {
+	err = json.NewDecoder(&buffer).Decode(&result)
+	if err != nil {
 		slog.Error("Failed to decode docker tag", "tag", tag, "error", err.Error())
 
 		return result
@@ -190,7 +345,7 @@ func (a *Application) ignoreBuild(ctx context.Context, tag string) bool {
 }
 
 func (a *Application) buildArgs() []string {
-	args := []string{}
+	args := make([]string, 0, len(a.BuildArgs)+len(a.BuildSecrets))
 
 	for _, buildArg := range a.BuildArgs {
 		args = append(args, "--build-arg="+buildArg)
@@ -252,7 +407,8 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 	buildArgs := append(a.Provider.ProgramArgs(a.WithAttestation), a.ProviderArgs...)
 	buildArgs = append(buildArgs, args...)
 
-	if err := a.shell(ctx, a.Provider.Program(), buildArgs...); err != nil {
+	err := a.shell(ctx, a.Provider.Program(), buildArgs...)
+	if err != nil {
 		return errors.Wrap(err, "failed to build image")
 	}
 
@@ -262,13 +418,7 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 func (a *Application) publishManifestRegistry(ctx context.Context, registry string, i int) error {
 	image := registry + a.ImagePath[i]
 
-	manifestCreateArgs := []string{
-		"buildx",
-		"imagetools",
-		"create",
-		"-t",
-		image,
-	}
+	manifestCreateArgs := append(make([]string, 0, 5+len(a.Platform)), buildxCommand, "imagetools", "create", "-t", image)
 
 	for _, platform := range a.Platform {
 		manifestCreateArgs = append(manifestCreateArgs, image+"-"+platform.Arch)
@@ -278,12 +428,13 @@ func (a *Application) publishManifestRegistry(ctx context.Context, registry stri
 	// create
 	ctx = context.WithValue(ctx, types.ContextKeyGroup, strconv.Itoa(i)+"/manifest/create")
 
-	if err := a.shell(ctx, a.Provider.Program(), manifestCreateArgs...); err != nil {
+	err := a.shell(ctx, a.Provider.Program(), manifestCreateArgs...)
+	if err != nil {
 		return errors.Wrap(err, "failed to create manifest")
 	}
 
 	manifestInspectArgs := []string{
-		"buildx",
+		buildxCommand,
 		"imagetools",
 		"inspect",
 		image,
@@ -292,7 +443,8 @@ func (a *Application) publishManifestRegistry(ctx context.Context, registry stri
 	// inspect
 	ctx = context.WithValue(ctx, types.ContextKeyGroup, strconv.Itoa(i)+"/manifest/inspect")
 
-	if err := a.shell(ctx, a.Provider.Program(), manifestInspectArgs...); err != nil {
+	err = a.shell(ctx, a.Provider.Program(), manifestInspectArgs...)
+	if err != nil {
 		return errors.Wrap(err, "failed to create manifest")
 	}
 
@@ -306,16 +458,13 @@ func (a *Application) publishManifest(ctx context.Context, i int) error {
 	wg := sync.WaitGroup{}
 
 	for _, registry := range a.Registry {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			if err := a.publishManifestRegistry(ctx, registry, i); err != nil {
+		wg.Go(func() {
+			err := a.publishManifestRegistry(ctx, registry, i)
+			if err != nil {
 				slog.Error("failed to publish manifest", "error", err.Error())
 				cancel()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -338,16 +487,13 @@ func (a *Application) buildImage(ctx context.Context, i int) error {
 	ctx = context.WithValue(ctx, types.ContextKeyGroup, strconv.Itoa(i))
 
 	for _, platform := range a.Platform {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			if err := a.buildImageArch(ctx, i, platform); err != nil {
+		wg.Go(func() {
+			err := a.buildImageArch(ctx, i, platform)
+			if err != nil {
 				slog.Error("failed to build image", "error", err.Error())
 				cancel()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -356,7 +502,8 @@ func (a *Application) buildImage(ctx context.Context, i int) error {
 		return ctx.Err() //nolint:wrapcheck
 	}
 
-	if err := a.publishManifest(ctx, i); err != nil {
+	err := a.publishManifest(ctx, i)
+	if err != nil {
 		return errors.Wrap(err, "failed to publish manifest")
 	}
 
@@ -387,7 +534,7 @@ func (a *Application) isGitlabPipelineRunOnBranch() bool {
 }
 
 func (a *Application) loadFromEnv() {
-	fromEnv := func(key string, value interface{}) {
+	fromEnv := func(key string, value any) {
 		env := os.Getenv(key)
 
 		if len(env) == 0 {
@@ -396,7 +543,8 @@ func (a *Application) loadFromEnv() {
 
 		switch v := value.(type) {
 		case *bool:
-			if b, err := strconv.ParseBool(env); err == nil {
+			b, err := strconv.ParseBool(env)
+			if err == nil {
 				*v = b
 			}
 		case *string:
@@ -406,131 +554,4 @@ func (a *Application) loadFromEnv() {
 
 	fromEnv("PARALLEL_IMAGE_BUILD_CHECK_IMAGE_ANNOTATION", &a.CheckImageAnnotation)
 	fromEnv("PARALLEL_IMAGE_BUILD_CHECK_IMAGE_ANNOTATION_KEY", &a.CheckImageAnnotationKey)
-}
-
-func (a *Application) Normalize() error { //nolint:cyclop,funlen
-	a.loadFromEnv()
-
-	if len(a.Provider) == 0 {
-		if err := a.Provider.Set(string(types.FlagProviderBuildx)); err != nil {
-			return errors.Wrap(err, "failed to set provider")
-		}
-	}
-
-	if platform := os.Getenv("PARALLEL_IMAGE_BUILD_PLATFORM"); len(platform) > 0 {
-		if err := a.Platform.Set(platform); err != nil {
-			return errors.Wrap(err, "failed to set platform from env")
-		}
-	}
-
-	if len(a.Platform) == 0 {
-		if err := a.Platform.Set("linux/amd64,linux/arm64"); err != nil {
-			return errors.Wrap(err, "failed to set platform")
-		}
-	}
-
-	a.loadFromTags()
-
-	if len(a.Registry) == 0 {
-		if err := a.Registry.Set("docker.io"); err != nil {
-			return errors.Wrap(err, "failed to set registry")
-		}
-	}
-
-	imageContext := make(types.FlagList, len(a.ImagePath))
-	imageDockerfile := make(types.FlagList, len(a.ImagePath))
-	imageArgs := make(types.FlagList, len(a.ImagePath))
-
-	for i := range a.ImagePath {
-		imageContext[i] = a.ImageContext.Get(i, ".")
-		imageDockerfile[i] = a.ImageDockerfile.Get(i, imageContext[i]+"/Dockerfile")
-		imageArgs[i] = a.ImageArgs.Get(i, "")
-	}
-
-	a.ImageContext = imageContext
-	a.ImageDockerfile = imageDockerfile
-	a.ImageArgs = imageArgs
-
-	// check gitlab pipeline platform
-	if len(a.GitlabBranchPlatform) > 0 && a.isGitlabPipelineRunOnBranch() {
-		a.Platform = types.FlagPlatform{}
-
-		if err := a.Platform.Set(a.GitlabBranchPlatform.String()); err != nil {
-			return errors.Wrap(err, "failed to set platform from gitlab")
-		}
-	}
-
-	// check gitlab pipeline registry
-	if len(a.GitlabBranchRegistry) > 0 && a.isGitlabPipelineRunOnBranch() {
-		a.Registry = types.FlagRegistry{}
-
-		if err := a.Registry.Set(a.GitlabBranchRegistry.String()); err != nil {
-			return errors.Wrap(err, "failed to set registry from gitlab")
-		}
-	}
-
-	a.Output = a.mergeOutput()
-
-	return nil
-}
-
-func (a *Application) Validate() error {
-	if err := a.Normalize(); err != nil {
-		return errors.Wrap(err, "failed to normalize")
-	}
-
-	if len(a.Provider) == 0 {
-		return errors.New("provider is empty")
-	}
-
-	if len(a.Registry) == 0 {
-		return errors.New("registry is empty")
-	}
-
-	if len(a.ImagePath) == 0 {
-		return errors.New("image-path is empty")
-	}
-
-	if len(a.ImageContext) != len(a.ImagePath) {
-		return errors.New("image-context is invalid")
-	}
-
-	if len(a.ImageDockerfile) != len(a.ImagePath) {
-		return errors.New("image-dockerfile is invalid")
-	}
-
-	for i := range a.ImagePath {
-		if !strings.HasPrefix(a.ImagePath[i], "/") {
-			a.ImagePath[i] = "/" + a.ImagePath[i]
-		}
-	}
-
-	return nil
-}
-
-func (a *Application) Run(ctx context.Context) error {
-	slog.Info("Application is running", "instance", a)
-	slog.Debug("Images", "len", len(a.ImagePath))
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	wg := sync.WaitGroup{}
-
-	for i := range a.ImagePath {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			if err := a.buildImage(ctx, i); err != nil {
-				slog.Error("failed to build image", "error", err.Error())
-				cancel()
-			}
-		}()
-	}
-
-	wg.Wait()
-
-	return ctx.Err() //nolint:wrapcheck
 }
