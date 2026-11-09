@@ -70,7 +70,7 @@ func NewApplication() *Application {
 		BuildSecrets:         nil,
 
 		// Attestation will work only with registry > v3.0.0+
-		WithAttestation: false,
+		WithAttestation: true,
 
 		CheckImageAnnotation:    true,
 		CheckImageAnnotationKey: "org.opencontainers.image.revision",
