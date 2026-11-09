@@ -43,7 +43,7 @@ func main() { //nolint:funlen
 	version := flag.Bool("version", false, "print version")
 	debug := flag.Bool("debug", false, "debug mode")
 
-	flag.BoolVar(&application.WithAttestation, "with-attestation", application.WithAttestation, "publish attestation on build")
+	flag.BoolVar(&application.WithAttestation, "with-attestation", application.WithAttestation, "publish SBOM and provenance attestations on build (requires registry > v3.0.0+, use =false to disable)")
 
 	flag.Parse()
 

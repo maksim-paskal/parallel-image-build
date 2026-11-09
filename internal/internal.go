@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -18,7 +19,12 @@ import (
 	"github.com/pkg/errors"
 )
 
-const buildxCommand = "buildx"
+const (
+	buildxCommand = "buildx"
+
+	// returned by buildx when the selected builder driver cannot produce attestations.
+	attestationNotSupportedError = "Attestation is not supported"
+)
 
 var Version = "dev" //nolint:gochecknoglobals
 
@@ -69,7 +75,8 @@ func NewApplication() *Application {
 		BuildArgs:            nil,
 		BuildSecrets:         nil,
 
-		// Attestation will work only with registry > v3.0.0+
+		// Publish SBOM and provenance attestations, requires registry > v3.0.0+
+		// and a builder that supports attestations (falls back to no attestation otherwise).
 		WithAttestation: true,
 
 		CheckImageAnnotation:    true,
@@ -259,6 +266,13 @@ func (a *Application) mergeOutput() string {
 }
 
 func (a *Application) shell(ctx context.Context, name string, arg ...string) error {
+	_, err := a.shellOutput(ctx, name, arg...)
+
+	return err
+}
+
+// run command, log its output and return it.
+func (a *Application) shellOutput(ctx context.Context, name string, arg ...string) (string, error) {
 	slog.Debug("Running command", "name", name, "args", arg)
 
 	cmd := exec.CommandContext(ctx, name, arg...)
@@ -269,19 +283,38 @@ func (a *Application) shell(ctx context.Context, name string, arg ...string) err
 		logger.Group = group
 	}
 
-	cmd.Stdout = &logger
-	cmd.Stderr = &logger
+	output := bytes.Buffer{}
+	writer := io.MultiWriter(&logger, &output)
+
+	// same writer for stdout and stderr, so writes are not concurrent
+	cmd.Stdout = writer
+	cmd.Stderr = writer
 
 	err := cmd.Run()
 	if err != nil {
-		return errors.Wrap(err, "failed to run command")
+		return output.String(), errors.Wrap(err, "failed to run command")
 	}
 
-	return nil
+	return output.String(), nil
 }
 
 type DockerImageInspect struct {
+	Annotations map[string]string     `json:"annotations"`
+	Manifests   []DockerImageManifest `json:"manifests"`
+}
+
+type DockerImageManifest struct {
+	Digest      string            `json:"digest"`
 	Annotations map[string]string `json:"annotations"`
+}
+
+// returns tag without tag suffix, registry:5000/image:tag -> registry:5000/image.
+func imageName(tag string) string {
+	if i := strings.LastIndex(tag, ":"); i > strings.LastIndex(tag, "/") {
+		return tag[:i]
+	}
+
+	return tag
 }
 
 // inspecting images, return empty map.
@@ -298,7 +331,7 @@ func (a *Application) inspectDockerTag(ctx context.Context, tag string) DockerIm
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = &buffer
 
-	result := DockerImageInspect{Annotations: nil}
+	result := DockerImageInspect{Annotations: nil, Manifests: nil}
 
 	// if command failed return empty result
 	err := cmd.Run()
@@ -313,6 +346,18 @@ func (a *Application) inspectDockerTag(ctx context.Context, tag string) DockerIm
 		slog.Error("Failed to decode docker tag", "tag", tag, "error", err.Error())
 
 		return result
+	}
+
+	// with attestation the tag is an index, build annotations are set on the image manifest inside it
+	if len(result.Annotations) == 0 {
+		for _, manifest := range result.Manifests {
+			// skip attestation manifests
+			if manifest.Annotations["vnd.docker.reference.type"] != "" {
+				continue
+			}
+
+			return a.inspectDockerTag(ctx, imageName(tag)+"@"+manifest.Digest)
+		}
 	}
 
 	return result
@@ -407,7 +452,16 @@ func (a *Application) buildImageArch(ctx context.Context, i int, platform types.
 	buildArgs := append(a.Provider.ProgramArgs(a.WithAttestation), a.ProviderArgs...)
 	buildArgs = append(buildArgs, args...)
 
-	err := a.shell(ctx, a.Provider.Program(), buildArgs...)
+	output, err := a.shellOutput(ctx, a.Provider.Program(), buildArgs...)
+	if err != nil && a.WithAttestation && strings.Contains(output, attestationNotSupportedError) {
+		slog.Warn("Builder does not support attestation, retrying without it", "image", image)
+
+		buildArgs = append(a.Provider.ProgramArgs(false), a.ProviderArgs...)
+		buildArgs = append(buildArgs, args...)
+
+		err = a.shell(ctx, a.Provider.Program(), buildArgs...)
+	}
+
 	if err != nil {
 		return errors.Wrap(err, "failed to build image")
 	}
@@ -554,4 +608,5 @@ func (a *Application) loadFromEnv() {
 
 	fromEnv("PARALLEL_IMAGE_BUILD_CHECK_IMAGE_ANNOTATION", &a.CheckImageAnnotation)
 	fromEnv("PARALLEL_IMAGE_BUILD_CHECK_IMAGE_ANNOTATION_KEY", &a.CheckImageAnnotationKey)
+	fromEnv("PARALLEL_IMAGE_BUILD_WITH_ATTESTATION", &a.WithAttestation)
 }
